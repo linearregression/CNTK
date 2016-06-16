@@ -1691,6 +1691,9 @@ public:
 
     void BackpropTo(const size_t inputIndex, const FrameRange& fr) override
     {
+        char buffer[100];
+        std::wcstombs(buffer, m_nodeName.c_str(), m_nodeName.length());
+        fprintf(stderr, "bn %s index: %zd\n", buffer, inputIndex);
         if (inputIndex == 0) // derivative with respect to the input.
         {
             auto sliceOutputGrad = GradientFor(fr);
@@ -1701,21 +1704,52 @@ public:
             auto sliceInputGrad = Input(0)->GradientFor(fr);
             m_dScale->Resize(scale);
             m_dBias->Resize(bias);
+
+            fprintf(stderr, "before engine backward:\n");
+
+            //sliceInputValue.Print("sliceInputValue", -3, -3, -3, -3);
+            //sliceOutputGrad.Print("sliceOutputGrad", -3, -3, -3, -3);
+            //scale.Print("scale", -3, -3, -3, -3);
+
+            m_saveMean->Print("m_saveMean", -3, -3, -3, -3);
+            m_saveInvStdDev->Print("m_saveInvStdDev", -3, -3, -3, -3);
+            //m_dScale->Print("m_dScale", -3, -3, -3, -3);
+            //m_dBias->Print("m_dBias", -3, -3, -3, -3);
+
+            fprintf(stderr, "stats: %lf, %lf, %lf \n%lf, %lf, %lf, %lf\n", sliceInputValue.FrobeniusNorm(), sliceOutputGrad.FrobeniusNorm(), scale.FrobeniusNorm(),
+                m_saveMean->FrobeniusNorm(), m_saveInvStdDev->FrobeniusNorm(), m_dScale->FrobeniusNorm(), m_dBias->FrobeniusNorm());
+
             // Compute all derivatives in one step. Save derivatives with respect to scale and bias in temp matrices.
             m_bnEng->Backward(sliceInputValue, sliceOutputGrad, sliceInputGrad, scale,
                                               *m_saveMean, *m_saveInvStdDev, *m_dScale, *m_dBias);
+
+            //fprintf(stderr, "after engine backward:\n");
+            //sliceInputValue.Print("sliceInputValue", -3, -3, -3, -3);
+            //sliceOutputGrad.Print("sliceOutputGrad", -3, -3, -3, -3);
+            //scale.Print("scale", -3, -3, -3, -3);
+
+            //m_saveMean->Print("m_saveMean", -3, -3, -3, -3);
+            //m_saveInvStdDev->Print("m_saveInvStdDev", -3, -3, -3, -3);
+            //m_dScale->Print("m_dScale", -3, -3, -3, -3);
+            //m_dBias->Print("m_dBias", -3, -3, -3, -3);
+
+            //fprintf(stderr, "stats: %lf, %lf, %lf \n%lf, %lf, %lf, %lf\n", sliceInputValue.FrobeniusNorm(), sliceOutputGrad.FrobeniusNorm(), scale.FrobeniusNorm(),
+            //    m_saveMean->FrobeniusNorm(), m_saveInvStdDev->FrobeniusNorm(), m_dScale->FrobeniusNorm(), m_dBias->FrobeniusNorm());
         }
         else if (inputIndex == 1) // derivative with respect to the scale
         {
             // Derivative with respect to the scale was precomputed during input derivative computation.
             Matrix<ElemType>& grad = Input(1)->Gradient();
             grad.SetValue(grad.GetNumRows(), grad.GetNumCols(), grad.GetDeviceId(), m_dScale->Data());
+
+            //grad.Print(buffer, -3, -3, -3, -3);
         }
         else if (inputIndex == 2) // derivative with respect to the bias
         {
             // Derivative with respect to the bias was precomputed during input derivative computation.
             Matrix<ElemType>& grad = Input(2)->Gradient();
             grad.SetValue(grad.GetNumRows(), grad.GetNumCols(), grad.GetDeviceId(), m_dBias->Data());
+            //grad.Print(buffer, -3, -3, -3, -3);
         }
         // No derivatives with respect to running mean and InvStdDev.
     }
@@ -1773,13 +1807,25 @@ public:
                 blendFactor = 1.0;
             else
                 blendFactor = m_blendTimeConst > 0 ? (m_blendTimeConst / (m_blendTimeConst + numSamples)) : 0;
-
+            
             m_saveMean->Resize(runMean);
             m_saveInvStdDev->Resize(runMean);
         }
 
         m_bnEng->Forward(sliceInputValue, scale, bias, expAvgFactor, blendFactor, runMean, runInvStdDev,
                          sliceOutputValue, m_epsilon, *m_saveMean, *m_saveInvStdDev);
+
+        if (Environment().IsTraining() && expAvgFactor == 0 && blendFactor == 1.0)
+        {
+            m_saveMean->SetValue(runMean);
+            m_saveInvStdDev->SetValue(runInvStdDev);
+        }
+
+        char buffer[100];
+        std::wcstombs(buffer, m_nodeName.c_str(), m_nodeName.length());
+        fprintf(stderr, "bn %s forward prop\n", buffer);
+        m_saveMean->Print("m_saveMean", -3, -3, -3, -3);
+        m_saveInvStdDev->Print("m_saveInvStdDev", -3, -3, -3, -3);
 
         m_mbCount++;
     }
